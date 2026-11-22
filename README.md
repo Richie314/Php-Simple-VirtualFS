@@ -3,6 +3,7 @@
 [![Packagist version](https://img.shields.io/packagist/v/richie314/simple-virtualfs)](https://packagist.org/packages/richie314/simple-virtualfs)
 [![Packagist downloads](https://img.shields.io/packagist/dt/richie314/simple-virtualfs)](https://packagist.org/packages/richie314/simple-virtualfs)
 ![PHP 8.3+](https://img.shields.io/badge/PHP-8.3%2B-777BB4?logo=php)
+[![MIT license](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
 
 A PHP 8.3+ Composer library for named storage locations, client-side file encryption, and PDF and image manipulation.
 Each `VirtualFilesystem` instance owns its mounts.
@@ -383,3 +384,8 @@ Use a Packagist account with update access to `richie314/simple-virtualfs`. [Pac
 Run **Test and release** from the repository's Actions tab with a new stable version such as `1.2.3`.
 After all PHP versions pass, the workflow tags the tested commit as `v1.2.3`, creates a GitHub release, and asks Packagist to refresh the package.
 If only the Packagist update fails, fix the credentials or package registration and use **Re-run failed jobs** to retry the update.
+
+## License
+
+This package is available under the [MIT License](LICENSE).
+Dependencies are distributed under their own licenses.

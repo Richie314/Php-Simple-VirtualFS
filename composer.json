@@ -2,6 +2,7 @@
     "name": "richie314/simple-virtualfs",
     "description": "Virtual file locations with client-side encryption and PDF and image helpers",
     "type": "library",
+    "license": "MIT",
     "require": {
         "php": "^8.3",
         "ext-fileinfo": "*",
@@ -27,6 +28,13 @@
             "Richie314\\SimpleVirtualFS\\": "src/"
         }
     },
+    "authors": [
+        {
+            "name": "Riccardo Ciucci",
+            "email": "riccardo@ciucci.dev"
+        }
+    ],
+    "minimum-stability": "stable",
     "archive": {
         "exclude": [
             "/demo", 
