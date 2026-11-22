@@ -23,7 +23,7 @@ Local, S3-compatible, Google Drive, WebDAV and read-only HTTP/HTTPS support come
 ```mermaid
 flowchart LR
     A["PHP application or multipart upload"] --> B["VirtualFilesystem<br/>scheme:///path"]
-    B --> C["Optional encryption<br/>keys stay in the application"]
+    B --> C["Optional encryption"]
     C --> D["Local, S3, Google Drive, WebDAV, HTTP(S)<br/>or a custom adapter"]
     B -. "metadata request" .-> D
 ```
