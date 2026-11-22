@@ -1,0 +1,38 @@
+name: simple-virtualfs-demo
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile
+    ports:
+      - "127.0.0.1:${DEMO_PORT:-8080}:8080"
+    environment:
+      S3_ENDPOINT: http://s3:9000
+      S3_ACCESS_KEY: virtualfs-demo
+      S3_SECRET_KEY: virtualfs-demo-local-only
+      S3_BUCKET: virtualfs-demo
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REFRESH_TOKEN: ${GOOGLE_REFRESH_TOKEN:-}
+      GOOGLE_DRIVE_FOLDER: ${GOOGLE_DRIVE_FOLDER:-VirtualFS Demo}
+      GOOGLE_DRIVE_FOLDER_ID: ${GOOGLE_DRIVE_FOLDER_ID:-}
+    depends_on:
+      s3:
+        condition: service_healthy
+  s3:
+    image: quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: virtualfs-demo
+      MINIO_ROOT_PASSWORD: virtualfs-demo-local-only
+    volumes:
+      - bucket-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 3s
+      timeout: 5s
+      retries: 15
+
+volumes:
+  bucket-data:

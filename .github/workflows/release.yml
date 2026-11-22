@@ -1,0 +1,110 @@
+name: Test and release
+run-name: Release ${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'New stable version, for example 1.2.3 (optional v prefix)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Serialize releases so two manual runs cannot publish the same version concurrently.
+concurrency:
+  group: manual-release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  validate:
+    name: Validate version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Check out the selected commit and all tags
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate a new stable version
+        id: version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ ! "$VERSION" =~ ^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo '::error::Use a stable version such as 1.2.3 or v1.2.3, without leading zeroes.'
+            exit 1
+          fi
+          version="${VERSION#v}"
+          tag="v$version"
+          # Reject both spellings to avoid two tags representing the same Composer version.
+          for candidate in "$version" "$tag"; do
+            if git show-ref --verify --quiet "refs/tags/$candidate"; then
+              echo "::error::Tag $candidate already exists."
+              exit 1
+            fi
+          done
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Test supported PHP versions
+    needs: validate
+    uses: ./.github/workflows/tests.yml
+
+  release:
+    name: Publish GitHub release
+    needs: [validate, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Publish tag and release for the tested commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          # Creating the ref atomically rejects an existing tag.
+          gh api --method POST "repos/$GH_REPO/git/refs" \
+            -f "ref=refs/tags/$RELEASE_TAG" \
+            -f "sha=$GITHUB_SHA"
+          gh release create "$RELEASE_TAG" \
+            --verify-tag \
+            --title "$RELEASE_TAG" \
+            --generate-notes
+
+  packagist:
+    name: Request Packagist update
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
+      PACKAGIST_API_TOKEN: ${{ secrets.PACKAGIST_API_TOKEN }}
+      REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
+    steps:
+      - name: Notify Packagist about the new tag
+        run: |
+          if [[ -z "$PACKAGIST_USERNAME" || -z "$PACKAGIST_API_TOKEN" ]]; then
+            echo '::error::Set the PACKAGIST_USERNAME and PACKAGIST_API_TOKEN repository secrets.'
+            exit 1
+          fi
+          payload=$(jq -cn --arg url "$REPOSITORY_URL" '{repository: {url: $url}}')
+          curl --fail --silent --show-error --retry 3 --max-time 30 \
+            --output /dev/null \
+            --url-query "username=$PACKAGIST_USERNAME" \
+            --url-query "apiToken=$PACKAGIST_API_TOKEN" \
+            --header 'Content-Type: application/json' \
+            --data "$payload" \
+            'https://packagist.org/api/update-package'

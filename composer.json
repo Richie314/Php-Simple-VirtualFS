@@ -1,0 +1,42 @@
+{
+    "name": "richie314/simple-virtualfs",
+    "description": "Virtual file locations with client-side encryption and PDF and image helpers",
+    "type": "library",
+    "require": {
+        "php": "^8.3",
+        "ext-fileinfo": "*",
+        "ext-gd": "*",
+        "ext-sodium": "*",
+        "guzzlehttp/guzzle": "^7.15.2",
+        "league/flysystem": "^3.35.3",
+        "league/flysystem-aws-s3-v3": "^3.0",
+        "league/flysystem-webdav": "^3.0",
+        "league/mime-type-detection": "^1.0",
+        "masbug/flysystem-google-drive-ext": "^3.0",
+        "ntzrbtr/flysystem-http": "^2.0",
+        "setasign/fpdf": "^1.9",
+        "setasign/fpdi": "^2.6"
+    },
+    "suggest": {
+        "league/flysystem-ftp": "Mount an FTP or FTPS server",
+        "league/flysystem-sftp-v3": "Mount an SFTP server",
+        "leapt/flysystem-onedrive": "Mount Microsoft OneDrive through Microsoft Graph"
+    },
+    "autoload": {
+        "psr-4": {
+            "Richie314\\SimpleVirtualFS\\": "src/"
+        }
+    },
+    "archive": {
+        "exclude": [
+            "/demo", 
+            "/.dockerignore",
+            "/tests",
+            "/.github",
+            "/AGENTS.md"
+        ]
+    },
+    "scripts": {
+        "test": "@php tests/smoke.php"
+    }
+}

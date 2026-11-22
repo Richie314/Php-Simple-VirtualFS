@@ -1,0 +1,46 @@
+:root {
+    color-scheme: light;
+    font-family: system-ui, sans-serif;
+    color: #15233f;
+    background: #f3f6fc;
+    line-height: 1.55;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+.wrap { width: min(100% - 2rem, 62rem); margin-inline: auto; }
+.masthead { background: #17294c; color: #fff; padding-block: 1rem; font-weight: 750; }
+.masthead span { margin-inline-start: .7rem; color: #d2def5; font-weight: 450; }
+main { padding-block: clamp(2rem, 6vw, 4rem); }
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: clamp(2rem, 6vw, 3.5rem); line-height: 1.12; letter-spacing: -.04em; }
+h2 { font-size: 1.35rem; }
+h3 { font-size: 1.2rem; }
+.intro { max-width: 58ch; margin-block: .65rem 2rem; }
+.cards, .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 1rem; }
+.cards { margin-block-start: .75rem; }
+.card, .notice { border: 1px solid #d4ddea; border-radius: .9rem; padding: clamp(1rem, 3vw, 1.6rem); background: #fff; }
+.card p { margin-block: .55rem; }
+.card .provider { margin-block-start: 0; color: #385580; font-weight: 650; font-size: .875rem; }
+.operation { margin-block-start: 1.25rem; }
+form { margin-block-start: 1rem; }
+label { display: block; margin-block-end: .25rem; font-weight: 650; }
+select, input, button { font: inherit; }
+select, input[type="file"], input[type="text"] { width: 100%; padding: .48rem; border: 1px solid #7c8ba3; border-radius: .35rem; background: #fff; color: inherit; }
+select {
+    appearance: none;
+    padding-inline-end: 2rem;
+    background: linear-gradient(45deg, transparent 50%, #385580 50%) right .9rem center / .35rem .35rem no-repeat,
+        linear-gradient(135deg, #385580 50%, transparent 50%) right .55rem center / .35rem .35rem no-repeat, #fff;
+}
+button { padding: .52rem .85rem; border: 0; border-radius: .4rem; background: #234ca5; color: #fff; font-weight: 650; cursor: pointer; }
+button:hover { background: #173a88; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid #496dd0; outline-offset: 3px; }
+.operation button, .operation h3 { margin-block-start: 1rem; }
+code { color: #183d8a; overflow-wrap: anywhere; }
+.notice { margin-block-end: 1.25rem; overflow-wrap: anywhere; }
+.success { border-color: #85baa7; background: #ebf9f2; }
+.failure { border-color: #d89690; color: #7d2727; background: #fff0ee; }
+dl { display: flex; flex-wrap: wrap; gap: .5rem 1.4rem; margin-block: .5rem 0; }
+dt { font-weight: 650; }
+dd { margin: 0; }
