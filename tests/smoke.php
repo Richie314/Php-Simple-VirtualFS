@@ -51,10 +51,12 @@ try {
 
     $data = "example\0bytes";
     $files->write('local:///private.bin', $data);
-    $raw = file_get_contents("$root/local/private.bin");
+    $raw = file_get_contents("$root/local/private.bin.enc.bin");
+    verify(!file_exists("$root/local/private.bin"), 'Encrypted writes must use only the suffixed backing path.');
+    verifyException(InvalidArgumentException::class, fn () => $files->read('local:///private.bin.enc.bin'));
     verify(!str_contains($raw, $data), 'The file override must encrypt the stored bytes.');
     $files->write('local:///private.bin', $data);
-    verify($raw !== file_get_contents("$root/local/private.bin"), 'Writes must use fresh nonces.');
+    verify($raw !== file_get_contents("$root/local/private.bin.enc.bin"), 'Writes must use fresh nonces.');
     $files->mountLocal('alias', "$root/local");
     verifyException(RuntimeException::class, fn () => $files->read('alias:///private.bin'));
     verifyException(InvalidArgumentException::class, fn () => $files->move('local:///private.bin', 'alias:///private.bin'));
@@ -66,9 +68,9 @@ try {
     verify($files->read('APP:///archive/report.bin') === $data, 'Move must use the destination key.');
     verify($files->size('app:///archive/report.bin') === strlen($data), 'Size must report plaintext bytes.');
     $info = $files->metadata('app:///archive/report.bin');
-    verify($info['size'] === filesize("$root/app/archive/report.bin"), 'Metadata must report stored bytes.');
+    verify($info['size'] === filesize("$root/app/archive/report.bin.enc.bin"), 'Metadata must report stored bytes.');
     verify($info['size'] > strlen($data), 'Stored size must include encryption overhead.');
-    verify($info['lastModified'] === filemtime("$root/app/archive/report.bin"), 'Metadata must use the storage timestamp.');
+    verify($info['lastModified'] === filemtime("$root/app/archive/report.bin.enc.bin"), 'Metadata must use the storage timestamp.');
     verify($info['mimeType'] === 'application/octet-stream', 'Encrypted files must use a generic MIME type.');
     verify(count($files->listContents('app:///archive')->toArray()) === 1, 'Listing must find the destination.');
     $rootEntries = $files->listContents('app:///')->toArray();
@@ -76,16 +78,26 @@ try {
     $tree = $files->listContents('APP:///', recursive: true)->toArray();
     verify(count($tree) === 2 && $tree[1]->isFile() && $tree[1]->path() === 'archive/report.bin', 'Recursive listing must include nested files with mount-relative paths.');
 
+    rename("$root/app/archive/report.bin.enc.bin", "$root/app/archive/report.bin");
+    verify($files->exists('app:///archive/report.bin'), 'Legacy encrypted files must still be found.');
+    verify($files->read('app:///archive/report.bin') === $data, 'Legacy ciphertext must remain readable.');
+    $files->write('app:///archive/report.bin', $data);
+    verify(!file_exists("$root/app/archive/report.bin"), 'Rewriting legacy ciphertext must remove the old name.');
+    $files->copy('app:///archive/report.bin', 'local:///decrypted.bin');
+    verify(file_get_contents("$root/local/decrypted.bin") === $data, 'Copies must use the destination naming and encryption policy.');
+
     $files->setFileKey('app:///archive/report.bin', random_bytes(32));
     verifyException(RuntimeException::class, fn () => $files->read('app:///archive/report.bin'));
     $files->setFileKey('app:///archive/report.bin', null);
-    $ciphertext = file_get_contents("$root/app/archive/report.bin");
-    file_put_contents("$root/app/archive/report.bin", substr($ciphertext, 0, -1));
+    $ciphertext = file_get_contents("$root/app/archive/report.bin.enc.bin");
+    file_put_contents("$root/app/archive/report.bin.enc.bin", substr($ciphertext, 0, -1));
     verifyException(RuntimeException::class, fn () => $files->read('app:///archive/report.bin'));
     $files->write('app:///archive/report.bin', $data);
 
-    copy("$root/app/archive/report.bin", "$root/app/archive/swapped.bin");
+    copy("$root/app/archive/report.bin.enc.bin", "$root/app/archive/swapped.bin.enc.bin");
     verifyException(RuntimeException::class, fn () => $files->read('app:///archive/swapped.bin'));
+    $files->delete('app:///archive/swapped.bin');
+    verify(!file_exists("$root/app/archive/swapped.bin.enc.bin"), 'Deleting a virtual file must remove its encrypted backing file.');
     verifyException(InvalidArgumentException::class, fn () => $files->read('local:///../app/archive/report.bin'));
     verifyException(InvalidArgumentException::class, fn () => $files->read('local:///%2e%2e/file'));
     $files->write('local:///example.png', 'plain text');
@@ -110,6 +122,8 @@ try {
     verify(!$files->exists('app:///upload.png'), 'Rejected uploads must not create a file.');
     if (DIRECTORY_SEPARATOR === '/') {
         symlink("$root/app", "$root/local/escape");
+        symlink("$root/local/decrypted.bin", "$root/app/blocked.bin.enc.bin");
+        verifyException(RuntimeException::class, fn () => $files->write('app:///blocked.bin', $data));
         verifyException(RuntimeException::class, fn () => $files->read('local:///escape/archive/report.bin'));
     }
 

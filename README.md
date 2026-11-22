@@ -301,6 +301,10 @@ Simple VirtualFS encrypts content in PHP before sending it to storage and authen
 It uses libsodium XChaCha20-Poly1305 with a fresh random nonce on every write.
 The storage adapter receives ciphertext, while the key stays in your application.
 File names, folder listings, modification times and stored sizes remain visible.
+Encrypted files are stored with an added `.enc.bin` suffix, so `secure:///summary.txt` is stored as `summary.txt.enc.bin`.
+Use the original virtual URI for every operation.
+Folder listings return the original names, and `.enc.bin` is reserved in virtual paths.
+Existing encrypted files stored without the suffix remain readable and switch to the new name when rewritten.
 
 Generate each key once with `base64_encode(random_bytes(32))` and save the encoded value in a local secret store or protected environment configuration.
 Decode the value before passing the 32 raw bytes to the library.

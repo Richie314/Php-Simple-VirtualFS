@@ -10,9 +10,11 @@ use GuzzleHttp\Client as HttpClient;
 use InvalidArgumentException;
 use League\Flysystem\AwsS3V3\AwsS3V3Adapter;
 use League\Flysystem\DirectoryListing;
+use League\Flysystem\FileAttributes;
 use League\Flysystem\Filesystem;
 use League\Flysystem\FilesystemAdapter;
 use League\Flysystem\Local\LocalFilesystemAdapter;
+use League\Flysystem\UnableToReadFile;
 use League\Flysystem\UnableToRetrieveMetadata;
 use League\Flysystem\WebDAV\WebDAVAdapter;
 use League\MimeTypeDetection\GeneratedExtensionToMimeTypeMap;
@@ -24,6 +26,8 @@ use Sabre\DAV\Client as WebDavClient;
 /** Routes virtual URIs to storage adapters and applies content encryption on this machine. */
 final class VirtualFilesystem
 {
+    private const ENCRYPTED_SUFFIX = '.enc.bin';
+
     private array $filesystems = [];
     private array $localRoots = [];
     private array $sourceKeys = [];
@@ -217,8 +221,19 @@ final class VirtualFilesystem
      */
     public function read(string $uri): string
     {
-        [$fs, $path, $uri, $key] = $this->resolve($uri);
-        return ContentEncryption::decode($fs->read($path), $uri, $key);
+        [$fs, $path, $uri, $key, $localPath] = $this->resolve($uri);
+        $preferredPath = $key === null ? $path : $this->encryptedPath($path, $localPath);
+        try {
+            $content = $fs->read($preferredPath);
+        } catch (UnableToReadFile $error) {
+            $existingPath = $this->existingFilePath($fs, $path, $key !== null, $localPath);
+            if ($existingPath === null || $existingPath === $preferredPath) {
+                throw UnableToReadFile::fromLocation($uri, previous: $error);
+            }
+            $content = $fs->read($existingPath);
+        }
+
+        return ContentEncryption::decode($content, $uri, $key);
     }
 
     /**
@@ -228,8 +243,18 @@ final class VirtualFilesystem
      */
     public function write(string $uri, #[\SensitiveParameter] string $content): void
     {
-        [$fs, $path, $uri, $key] = $this->resolve($uri);
-        $fs->write($path, ContentEncryption::encode($content, $uri, $key));
+        [$fs, $path, $uri, $key, $localPath] = $this->resolve($uri);
+        $encryptedPath = $this->encryptedPath($path, $localPath);
+        if ($key === null && $fs->fileExists($encryptedPath)) {
+            throw new RuntimeException("Configure the encryption key before replacing $uri.");
+        }
+
+        // Remove an older unsuffixed file only after its encrypted replacement is stored.
+        $replaceLegacy = $key !== null && $fs->fileExists($path);
+        $fs->write($key === null ? $path : $encryptedPath, ContentEncryption::encode($content, $uri, $key));
+        if ($replaceLegacy) {
+            $fs->delete($path);
+        }
     }
 
     /**
@@ -239,8 +264,8 @@ final class VirtualFilesystem
      */
     public function exists(string $uri): bool
     {
-        [$fs, $path] = $this->resolve($uri);
-        return $fs->fileExists($path);
+        [$fs, $path, , $key, $localPath] = $this->resolve($uri);
+        return $this->existingFilePath($fs, $path, $key !== null, $localPath) !== null;
     }
 
     /**
@@ -250,7 +275,16 @@ final class VirtualFilesystem
      */
     public function delete(string $uri): void
     {
-        [$fs, $path] = $this->resolve($uri);
+        [$fs, $path, , , $localPath] = $this->resolve($uri);
+        $encryptedPath = $this->encryptedPath($path, $localPath);
+        if ($fs->fileExists($encryptedPath)) {
+            if ($fs->fileExists($path)) {
+                $fs->delete($path);
+            }
+            $fs->delete($encryptedPath);
+            return;
+        }
+
         $fs->delete($path);
     }
 
@@ -276,12 +310,18 @@ final class VirtualFilesystem
      */
     public function move(string $from, string $to): void
     {
-        [, , $source, , $sourceLocal] = $this->resolve($from);
-        [, , $destination, , $destinationLocal] = $this->resolve($to);
+        [$sourceFs, $sourcePath, $source, $sourceKey, $sourceLocal] = $this->resolve($from);
+        [$destinationFs, $destinationPath, $destination, $destinationKey, $destinationLocal] = $this->resolve($to);
         if ($source === $destination) {
             return;
         }
         if ($sourceLocal !== null && $destinationLocal !== null) {
+            if ($this->existingFilePath($sourceFs, $sourcePath, $sourceKey !== null, $sourceLocal) === $sourcePath . self::ENCRYPTED_SUFFIX) {
+                $sourceLocal .= self::ENCRYPTED_SUFFIX;
+            }
+            if ($this->existingFilePath($destinationFs, $destinationPath, $destinationKey !== null, $destinationLocal) === $destinationPath . self::ENCRYPTED_SUFFIX) {
+                $destinationLocal .= self::ENCRYPTED_SUFFIX;
+            }
             $sourceStat = @stat($sourceLocal);
             $destinationStat = @stat($destinationLocal);
             if ($sourceLocal === $destinationLocal
@@ -297,10 +337,16 @@ final class VirtualFilesystem
         $this->delete($source);
     }
 
-    /** Return the plaintext size in bytes. Encrypted files are read and authenticated to compute it. */
+    /**
+     * Return the plaintext size in bytes.
+     * Encrypted files are read and authenticated to compute it.
+     */
     public function size(string $uri): int
     {
-        [$fs, $path, , $key] = $this->resolve($uri);
+        [$fs, $path, $canonical, $key, $localPath] = $this->resolve($uri);
+        if ($key === null && $this->existingFilePath($fs, $path, false, $localPath) === $path . self::ENCRYPTED_SUFFIX) {
+            throw new RuntimeException("Configure the encryption key before reading $canonical.");
+        }
         return $key === null ? $fs->fileSize($path) : strlen($this->read($uri));
     }
 
@@ -332,7 +378,7 @@ final class VirtualFilesystem
     public function listContents(string $uri, bool $recursive = false): DirectoryListing
     {
         [$fs, $path] = $this->resolve($uri, allowRoot: true);
-        return $fs->listContents($path, $recursive);
+        return new DirectoryListing($this->virtualEntries($fs->listContents($path, $recursive)));
     }
 
     /**
@@ -346,11 +392,14 @@ final class VirtualFilesystem
      */
     public function metadata(string $uri): array
     {
-        [$fs, $path, , $key, , $scheme] = $this->resolve($uri);
+        [$fs, $path, , $key, $localPath, $scheme] = $this->resolve($uri);
+        $storedPath = $this->existingFilePath($fs, $path, $key !== null, $localPath) ?? $path;
+        $encrypted = $key !== null || $storedPath !== $path;
+        $path = $storedPath;
         $size = $fs->fileSize($path);
         $lastModified = $fs->lastModified($path);
         $mimeType = null;
-        if ($key === null) {
+        if (!$encrypted) {
             if ($this->serverMimeTypes[$scheme]) {
                 try {
                     $mimeType = $fs->mimeType($path);
@@ -364,6 +413,61 @@ final class VirtualFilesystem
         }
 
         return ['mimeType' => $mimeType ?? 'application/octet-stream', 'lastModified' => $lastModified, 'size' => $size];
+    }
+
+    /** Translate an encrypted backing path while checking the final local component. */
+    private function encryptedPath(string $path, ?string $localPath): string
+    {
+        if ($localPath !== null && is_link($localPath . self::ENCRYPTED_SUFFIX)) {
+            throw new RuntimeException('Symbolic links are unsupported within local locations.');
+        }
+        return $path . self::ENCRYPTED_SUFFIX;
+    }
+
+    /** Select the encrypted or plain representation, falling back to the other existing file. */
+    private function existingFilePath(Filesystem $fs, string $path, bool $encrypted, ?string $localPath): ?string
+    {
+        if (!$encrypted && $fs->fileExists($path)) {
+            return $path;
+        }
+        $encryptedPath = $this->encryptedPath($path, $localPath);
+        if ($fs->fileExists($encryptedPath)) {
+            return $encryptedPath;
+        }
+        return $encrypted && $fs->fileExists($path) ? $path : null;
+    }
+
+    /**
+     * Present stored file names as virtual paths and omit duplicate names during migration.
+     *
+     * @return iterable<\League\Flysystem\StorageAttributes>
+     */
+    private function virtualEntries(DirectoryListing $listing): iterable
+    {
+        $seen = [];
+        foreach ($listing as $entry) {
+            $path = $entry->path();
+            $directory = $entry->isDir() ? $path : dirname($path);
+            if (str_contains(strtolower($directory) . '/', self::ENCRYPTED_SUFFIX . '/')) {
+                continue;
+            }
+            if ($entry->isDir()) {
+                yield $entry;
+                continue;
+            }
+
+            if (str_ends_with(strtolower($path), self::ENCRYPTED_SUFFIX)) {
+                $path = substr($path, 0, -strlen(self::ENCRYPTED_SUFFIX));
+                if ($path === '' || str_ends_with($path, '/') || str_ends_with(strtolower($path), self::ENCRYPTED_SUFFIX)) {
+                    continue;
+                }
+                $entry = new FileAttributes($path, $entry->fileSize(), $entry->visibility(), $entry->lastModified(), 'application/octet-stream');
+            }
+            if ($path !== '' && !isset($seen[$path])) {
+                $seen[$path] = true;
+                yield $entry;
+            }
+        }
     }
 
     /**
@@ -425,7 +529,7 @@ final class VirtualFilesystem
         }
         foreach ($path === '' ? [] : explode('/', $path) as $segment) {
             if ($segment === '' || $segment === '.' || $segment === '..' || str_ends_with($segment, '.')
-                || trim($segment) !== $segment
+                || trim($segment) !== $segment || str_ends_with(strtolower($segment), self::ENCRYPTED_SUFFIX)
             ) {
                 throw new InvalidArgumentException('Invalid virtual path segment.');
             }
